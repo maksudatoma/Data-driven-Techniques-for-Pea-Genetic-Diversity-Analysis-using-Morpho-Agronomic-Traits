@@ -1,0 +1,921 @@
+---
+title: "Peas Analysis"
+format: pdf
+editor: visual
+---
+
+# EDA
+
+```{r}
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(skimr)
+library(janitor)
+library(forcats)
+library(GGally)
+library(corrplot)
+library(naniar)
+library(stringr)
+
+```
+
+```{r}
+
+# If you already have Data in memory, skip the next line
+Data <- read_excel("Peas-analysis.xlsx")
+
+# Optional: clean column names to snake_case (comment out if you prefer original names)
+# Data <- janitor::clean_names(Data)
+
+# Peek
+glimpse(Data)
+skimr::skim(Data)
+
+
+```
+
+```{r}
+names(Data)
+```
+
+```{r}
+#| echo: false
+
+library(dplyr)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+
+# Compute descriptive statistics
+summary_stats <- Data %>%
+  summarise(across(everything(),
+                   list(mean = ~mean(.x, na.rm = TRUE),
+                        sd   = ~sd(.x, na.rm = TRUE),
+                        min  = ~min(.x, na.rm = TRUE),
+                        q1   = ~quantile(.x, 0.25, na.rm = TRUE),
+                        med  = ~median(.x, na.rm = TRUE),
+                        q3   = ~quantile(.x, 0.75, na.rm = TRUE),
+                        max  = ~max(.x, na.rm = TRUE)))) %>%
+  pivot_longer(cols = everything(),
+               names_to = c("Trait", ".value"),
+               names_sep = "_") %>%
+  arrange(Trait)
+
+# Round for readability
+summary_stats <- summary_stats %>%
+  mutate(across(where(is.numeric), ~round(.x, 2)))
+
+# Print as formatted table
+kbl(summary_stats, caption = "Descriptive Statistics for 25 Morpho-Agronomic Traits (n = 329)",
+    align = "c", digits = 2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = FALSE, position = "center")
+
+
+
+```
+
+There was significant variance among genotypes, as seen by the coefficient of variation for 25 morpho-agronomic characteristics, which varied from 8.17% (HaDAS) to 68.25% (YPPtg). While traits with low CV (HaDAS, Nd1fl) indicate higher phenotypic stability, high CV values for yield-related traits (YPPtg, PoPPt, SdPPt) indicate considerable genetic variability and chances for efficient selection.The dataset's suitability for discovering superior pea genotypes in breeding programs is supported by its overall stable and highly variable features.
+
+```{r}
+cv_tbl <- Data %>%
+  summarise(across(everything(),
+                   list(mean = ~mean(.x, na.rm=TRUE),
+                        sd   = ~sd(.x,   na.rm=TRUE)))) %>%
+  tidyr::pivot_longer(cols = everything(),
+                      names_to = c("trait",".value"),
+                      names_sep = "_") %>%
+  mutate(cv_perc = 100 * sd / mean) %>%
+  arrange(desc(cv_perc))
+cv_tbl
+
+```
+
+```{r}
+library(ggplot2)
+Data %>%
+  tidyr::pivot_longer(everything(), names_to="trait", values_to="value") %>%
+  ggplot(aes(value)) +
+  geom_histogram(bins=30, fill="steelblue", color="white") +
+  facet_wrap(~trait, scales="free") +
+  theme_minimal() +
+  labs(title="Distribution of 25 morpho-agronomic traits in 329 pea genotypes")
+
+
+```
+
+```{r}
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+Data %>%
+  pivot_longer(everything(), names_to = "trait", values_to = "value") %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "white", alpha = 0.7) +
+  geom_density(color = "darkblue", size = 0.8, adjust = 1.2) +
+  facet_wrap(~trait, scales = "free", ncol = 5) +
+  theme_minimal(base_size = 10) +
+  labs(title = "Distribution (Histogram + Density) of 25 Morpho-Agronomic Traits in 329 Pea Genotypes",
+       x = "Value", y = "Density") +
+  theme(
+    plot.title = element_text(size = 13, face = "bold", hjust = 0.5),
+    strip.text = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+
+```
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+# Define trait types
+cat_traits <- c("Vig", "Pgm", "Lfty", "Flcl", "Pocl", "Posh")
+cont_traits <- setdiff(names(Data), cat_traits)
+
+# 1️⃣ Continuous traits — hist + density
+p1 <- Data %>%
+  pivot_longer(all_of(cont_traits), names_to="Trait", values_to="Value") %>%
+  ggplot(aes(x=Value)) +
+  geom_histogram(aes(y=..density..), bins=25, fill="#69b3a2", color="white", alpha=0.6) +
+  geom_density(color="#1a5276", size=0.9, adjust=1.1) +
+  facet_wrap(~Trait, scales="free", ncol=5) +
+  theme_minimal(base_size=11) +
+  labs(title="Continuous Traits: Histogram + Density",
+       x="Trait Value", y="Density") +
+  theme(
+    plot.title = element_text(size=14, face="bold", hjust=0.5),
+    strip.text = element_text(face="bold", size=9),
+    axis.text.x = element_text(size=7),
+    axis.text.y = element_text(size=7)
+  )
+
+# 2️⃣ Categorical traits — bar charts
+p2 <- Data %>%
+  pivot_longer(all_of(cat_traits), names_to="Trait", values_to="Value") %>%
+  ggplot(aes(x=factor(Value))) +
+  geom_bar(fill="#229954", alpha=0.8, width=0.7) +
+  facet_wrap(~Trait, scales="free_x", ncol=6) +
+  theme_minimal(base_size=11) +
+  labs(title="Categorical Traits: Frequency Distribution",
+       x="Category", y="Count") +
+  theme(
+    plot.title = element_text(size=14, face="bold", hjust=0.5),
+    strip.text = element_text(face="bold", size=9),
+    axis.text.x = element_text(size=7)
+  )
+
+# Combine plots with a clear gap
+combined_plot <- p1 / p2 + plot_layout(heights = c(2, 1))
+combined_plot
+
+
+```
+
+## Correlation
+
+```{r}
+library(corrplot)
+cmat <- cor(Data, use="pairwise.complete.obs")
+corrplot(cmat, method="color", type="upper", tl.cex=0.7, title="Trait correlation matrix")
+
+```
+
+```{r}
+library(dplyr)
+
+corr_mat <- Data %>%
+  select(where(is.numeric)) %>%
+  cor(use = "pairwise.complete.obs", method = "pearson")
+# Lower triangle only
+get_lower_tri <- function(cormat){
+  cormat[upper.tri(cormat)] <- NA
+  return(cormat)
+}
+
+lower_corr <- get_lower_tri(corr_mat)
+
+library(knitr)
+library(kableExtra)
+
+kable(round(lower_corr, 3), caption = "Trait Correlation Matrix (Pearson)") %>%
+  kable_styling(full_width = FALSE, position = "center", font_size = 10) %>%
+  scroll_box(width = "100%", height = "500px")
+
+
+library(Hmisc)
+
+corr_res <- rcorr(as.matrix(Data %>% select(where(is.numeric))), type = "pearson")
+
+# Correlation coefficients
+corr_table <- round(corr_res$r, 3)
+# P-values
+pval_table <- round(corr_res$P, 4)
+
+# Combine into one display table
+sig_table <- ifelse(pval_table < 0.001, "***",
+                    ifelse(pval_table < 0.01, "**",
+                           ifelse(pval_table < 0.05, "*", "")))
+
+corr_with_sig <- paste0(corr_table, sig_table)
+
+kable(corr_with_sig, caption = "Correlation Coefficients with Significance Levels") %>%
+  kable_styling(full_width = FALSE, font_size = 9)
+
+
+```
+
+```{r}
+library(dplyr)
+
+# Compute correlation matrix (only numeric traits)
+corr_data <- Data %>%
+  select(where(is.numeric)) %>%
+  cor(use = "pairwise.complete.obs", method = "pearson")
+
+library(ggcorrplot)
+
+ggcorrplot(
+  corr_data,
+  method = "square",
+  type = "lower",
+  lab = FALSE,
+  colors = c("red", "white", "blue"),
+  tl.col = "red",
+  tl.srt = 45
+) +
+  ggtitle("Trait Correlation Matrix") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+    axis.text.y = element_text(size = 9)
+  )
+
+
+```
+
+## PCA
+
+The PCA correlation circle showed that reproductive and yield-related traits like number of pods per plant, seeds per plant, thousand-seed weight, and pod length drive the primary axis of phenotypic variation. Dim1, 14.4%, was largely associated with these traits. Dim2, 12.2%, showed vegetative vigor and phenology, distinguishing taller, late-maturing plants from shorter, early-maturing ones. YPPtg, PoPPt, SdPPt, and TSWg had strong positive alignments, confirming their close functional linkages in yield, but emergence percentage and plant height loaded oppositely, suggesting trade-offs between vegetative growth and reproductive production. The PCA shows that reproductive efficiency, not vegetative size, drives pea genotype variability in this dataset.
+
+```{r}
+pca_res <- prcomp(Data, scale.=TRUE)
+summary(pca_res)    # proportion of variance
+library(factoextra)
+fviz_eig(pca_res, addlabels=TRUE, ylim=c(0,60))
+fviz_pca_var(pca_res, col.var="contrib", repel=TRUE)
+fviz_pca_ind(pca_res, pointsize=1.5, alpha.ind=0.6,
+             title="PCA of 329 pea genotypes (based on 25 traits)")
+
+```
+
+## Clustering
+
+```{r}
+dist_mat <- dist(scale(Data))
+hc <- hclust(dist_mat, method="ward.D2")
+plot(hc, labels=FALSE, hang=-1, main="Hierarchical clustering of pea genotypes")
+rect.hclust(hc, k=4, border="red")  # choose 3–6 clusters visually
+
+```
+
+```{r}
+library(factoextra)
+
+# Select numeric traits
+num_traits <- c("Empct","Vig","Pgm","Lfty","Flcl","Nd1fl","DFdys","Pocl",
+                "Posh","Nd1po","DPdys","Ht1nd","DPMdys","HaDAS","PHcm",
+                "Ino","Ilncm","Polncm","Powdcm","PoPPt","SdPPo","SdPPt",
+                "TSWg","YPPtg","YPPltg")
+
+# Proper elbow plot syntax
+fviz_nbclust(Data[, num_traits], kmeans, method = "wss", k.max = 10) +
+  geom_point(color = "blue", size = 2) +
+  geom_line(color = "blue", linewidth = 1) +
+  labs(
+    title = "Elbow Plot for Optimal Number of Clusters (k)",
+    subtitle = "Based on Within-Cluster Sum of Squares (WSS)",
+    x = "Number of Clusters (k)",
+    y = "Total Within-Cluster Sum of Squares"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+```
+
+**Cluster Choice:** The Elbow Method established the appropriate number of clusters by determining when adding clusters reduces the within-cluster sum of squares (WSS) diminishingly. As seen in Figure X, WSS reduced substantially between k = 1 and 4, but the curve flattened after four clusters, showing little progress. Thus, k = 4 was chosen as the optimal number of clusters for statistically effective and biologically significant difference among the 329 pea genotypes.
+
+The heatmap illustrates the standardized mean values (Z-scores) of 25 morpho-agronomic traits across four clusters of pea genotypes. In this visualization, red cells represent traits with higher-than-average expression within a cluster, white cells indicate traits near the population mean, and blue cells denote lower-than-average values. Thus, red corresponds to high trait intensity, while blue indicates weaker expression. Each column denotes an individual trait, and each row summarizes the average performance of genotypes within a cluster. The dendrogram above the heatmap groups traits that are positively correlated, such as yield components (e.g., YPPtg, TSWg, PoPPt, SdPPt), which tend to vary together.
+
+Overall, the heatmap shows cluster phenotypic differentiation. Cluster 1 has tall, robust, moderately yielding, mildew-susceptible genotypes with stronger plant architecture and disease features (Pocl, Ht1nd, Powdcm) but lower yield components. Cluster 2 has early-maturing, high-yielding lines that are potential for drought-tolerant breeding due to enhanced yield-related characteristics (YPPtg, TSWg, PoPPt, SdPPt) and decreased maturity durations (DFdys, DPMdys, HaDAS). Most traits in Cluster 3 are low (blue), indicating low-performing genotypes with weak vegetative and reproductive vigor. Cluster 4 strongly expresses early developmental and floral features (Empct, Flcl, Nd1fl), suggesting morphologically different lines with superior emergence and floral attributes that may donate early growth or floral-morphology improvement.
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(pheatmap)
+
+# Add cluster info
+clustered_data <- Data %>%
+  mutate(Cluster = factor(km.res$cluster))
+
+# Compute cluster means for all numeric traits
+cluster_means <- clustered_data %>%
+  group_by(Cluster) %>%
+  summarise(across(all_of(num_traits), mean, na.rm = TRUE))
+
+# Remove 'Cluster' column and set row names
+mat <- as.matrix(cluster_means[ , -1])
+rownames(mat) <- paste("Cluster", cluster_means$Cluster)
+
+# Create heatmap: scaling by column (trait)
+pheatmap(mat,
+         scale = "column",
+         cluster_rows = FALSE,
+         cluster_cols = TRUE,
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),
+         main = "Cluster Profiles Across 25 Morpho-Agronomic Traits",
+         angle_col = 45,
+         fontsize_row = 11,
+         fontsize_col = 10,
+         border_color = NA)
+
+
+
+```
+
+```{r}
+set.seed(2025)
+kfit <- kmeans(scale(Data), centers=4)
+fviz_cluster(kfit, data=scale(Data))
+
+```
+
+```{r}
+# Load packages
+library(dplyr)
+library(factoextra)
+library(ggplot2)
+library(ggrepel)
+
+# 1 Select numeric trait columns (your 25 traits)
+num_traits <- c("Empct","Vig","Pgm","Lfty","Flcl","Nd1fl","DFdys","Pocl",
+                "Posh","Nd1po","DPdys","Ht1nd","DPMdys","HaDAS","PHcm",
+                "Ino","Ilncm","Polncm","Powdcm","PoPPt","SdPPo","SdPPt",
+                "TSWg","YPPtg","YPPltg")
+
+# 2 Run PCA on numeric traits
+res.pca <- prcomp(Data[, num_traits], scale. = TRUE)
+
+# 3 Run k-means clustering (4 clusters)
+set.seed(123)
+cluster <- kmeans(res.pca$x[, 1:2], centers = 4)$cluster
+
+# 4 Visualize clusters beautifully
+fviz_cluster(
+  list(data = res.pca$x, cluster = cluster),
+  geom = "point",
+  ellipse.type = "convex",
+  palette = c("#E74C3C", "#27AE60", "#3498DB", "#9B59B6"),
+  ggtheme = theme_minimal(base_size = 13),
+  show.clust.cent = TRUE,
+  repel = TRUE
+) +
+  geom_text_repel(aes(label = rownames(Data)),
+                  size = 3,
+                  max.overlaps = 20,
+                  box.padding = 0.3,
+                  segment.color = "grey60") +
+  labs(
+    title = "Cluster of 329 Pea Genotypes Based on 25 Morpho-Agronomic Traits",
+    subtitle = "Visualization based on PCA (Dim1 & Dim2)",
+    x = "Principal Component 1",
+    y = "Principal Component 2"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    legend.position = "right",
+    legend.title = element_text(face = "bold")
+  )
+
+
+```
+
+The cluster plot (Figure X) groups 329 pea genotypes by principal component (PC1 and PC2) scores from 25 morpho-agronomic traits. These two main components capture most trait variation, allowing two-dimensional genotype distribution display. The four K-means clusters, color-coded and shape-differentiated, show genotypes' various phenotypic groups.
+
+Cluster 1 (blue circles) on the left has genotypes with modest vegetative growth and balanced performance across most parameters. Yield and maturity traits are usually intermediate in these genotypes. Cluster 2 (green triangles) on the right has genotypes with high pods per plant, seed weight, total yield, and early maturity. This cluster has high-yielding, agronomically excellent lineages. Cluster 3 (red squares) in the upper-central region has tall, strong plants with higher vegetative development and height but lower yield potential. These may be tall and late-maturing. Cluster 4 (yellow crosses) in the lower-central area has genotypes with lower mean values for most morpho-agronomic variables, indicating less productive or weakly expressing lines.
+
+Significant population phenotypic heterogeneity is shown by cluster separation. Genotypes at cluster boundaries may share qualities between groups, while those near cluster centers are typical of each class. This clustering pattern proves PCA and K-means can classify pea genotypes by morphology and agronomy.
+
+```{r}
+# --- Libraries ---
+library(factoextra)
+library(ggplot2)
+
+# --- PCA and clustering (if not already done) ---
+# Suppose your numeric traits are in 'num_traits'
+res.pca <- prcomp(Data[, num_traits], scale. = TRUE)
+
+# K-means clustering (you chose 4 clusters)
+set.seed(123)
+km.res <- kmeans(res.pca$x[, 1:2], centers = 4, nstart = 25)
+
+# --- Cluster plot like your image ---
+fviz_cluster(
+  object = km.res,
+  data   = res.pca$x[, 1:2],
+  geom   = "point",
+  show.clust.cent = TRUE,       # shows cluster centers
+  repel  = TRUE,                # avoid label overlap
+  pointsize = 3,
+  ellipse.type = "convex",
+  ggtheme = theme_minimal(base_size = 13),
+  palette = c("#377EB8", "#4DAF4A", "#E41A1C", "#FFD92F")  # blue, green, red, yellow
+) +
+  geom_text(aes(label = rownames(Data)), size = 2, vjust = 1.2)
+
+  labs(
+    title = "K-Means Clustering of 329 Genotypes Based on Morphological Traits",
+    x = paste0("Dim1 (", round(summary(res.pca)$importance[2,1]*100, 1), "%)"),
+    y = paste0("Dim2 (", round(summary(res.pca)$importance[2,2]*100, 1), "%)")
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    legend.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+```
+
+```{r}
+# Load packages
+library(factoextra)
+library(ggplot2)
+
+# Re-run PCA if not already done
+res.pca <- prcomp(Data[, num_traits], scale. = TRUE)
+
+# Apply k-means using 4 clusters (based on elbow plot)
+set.seed(123)
+km.res <- kmeans(res.pca$x[, 1:4], centers = 4, nstart = 25)
+
+# Generate the discriminant coordinate plot
+fviz_cluster(
+  list(data = res.pca$x, cluster = km.res$cluster),
+  ellipse.type = "norm",          # use normal ellipse, smoother look
+  palette = c("#E74C3C", "#27AE60", "#3498DB", "#9B59B6"),
+  geom = "point",
+  ggtheme = theme_minimal(base_size = 13),
+  show.clust.cent = TRUE,         # show cluster centers
+  pointsize = 2
+) +
+  labs(
+    title = "Discriminant Coordinates Plot of Pea Genotypes",
+    subtitle = paste0(
+      "Based on PCA components explaining ",
+      round(sum(summary(res.pca)$importance[2, 1:2]) * 100, 2), "% of total variation"
+    ),
+    x = paste0("Component 1 (", round(summary(res.pca)$importance[2, 1] * 100, 2), "%)"),
+    y = paste0("Component 2 (", round(summary(res.pca)$importance[2, 2] * 100, 2), "%)")
+  ) +
+  annotate("text",
+           x = min(res.pca$x[,1]) + 2,
+           y = min(res.pca$x[,2]) - 2,
+           label = paste0(
+             "These two components explain ",
+             round(sum(summary(res.pca)$importance[2, 1:2]) * 100, 2),
+             "% of the total variability."
+           ),
+           hjust = 0, size = 3.5, color = "gray30") +
+  theme(
+    plot.title = element_text(face = "bold", size = 15, hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5),
+    legend.title = element_text(face = "bold"),
+    legend.position = "right"
+  )
+
+```
+
+```{r}
+library(cluster)
+library(factoextra)
+library(ggplot2)
+
+# PCA
+res.pca <- prcomp(Data[, num_traits], scale. = TRUE)
+
+# Optimal cluster number (based on elbow) — assume 4
+set.seed(123)
+km.res <- kmeans(res.pca$x[, 1:4], centers = 4, nstart = 25)
+
+# Visualize with discriminant coordinates (PCA scatter)
+fviz_cluster(
+  list(data = res.pca$x, cluster = km.res$cluster),
+  ellipse.type = "norm",
+  geom = "point",
+  palette = c("#E74C3C", "#27AE60", "#3498DB", "#9B59B6"),
+  ggtheme = theme_minimal(base_size = 13),
+  show.clust.cent = TRUE
+) +
+  labs(
+    title = "Discriminant Coordinates Plot of Pea Genotypes",
+    subtitle = paste0(
+      "Based on PCA components explaining ",
+      round(sum(summary(res.pca)$importance[2, 1:2]) * 100, 2), "% of variance"
+    ),
+    x = paste0("Component 1 (", round(summary(res.pca)$importance[2, 1] * 100, 2), "%)"),
+    y = paste0("Component 2 (", round(summary(res.pca)$importance[2, 2] * 100, 2), "%)")
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    plot.subtitle = element_text(size = 11, hjust = 0.5),
+    legend.title = element_text(face = "bold")
+  )
+
+```
+
+## Factor Analysis
+
+**Interpretation of Diagram:**
+
+The factor loading path diagram visualizes how 25 morphological, physiological, and yield-related pea traits group under four latent factors. The first factor (ML1) represents reproductive efficiency and yield components, the second describes pod and seed morphology, the third captures vegetative growth structure, and the fourth reflects phenological and leaf-type variation. The strongest contributions arise from yield and pod-related traits (loadings \>0.8), indicating these dimensions dominate the overall variability among genotypes.
+
+```{r}
+library(psych)
+
+# Select only numeric traits (25 total)
+X <- Data |> dplyr::select(where(is.numeric)) |> scale()
+
+# Determine number of factors (e.g., parallel analysis)
+fa.parallel(X, fa="fa")
+
+# Fit FA model (say 4 factors, with varimax rotation)
+fa_model <- fa(X, nfactors=4, rotate="varimax", fm="ml")
+
+# View results
+print(fa_model, cut=.4)
+fa.diagram(fa_model)
+
+
+
+library(reshape2); library(ggplot2)
+loadings <- as.data.frame(unclass(fa_model$loadings))
+loadings$Trait <- rownames(loadings)
+melt(loadings, id.vars="Trait") |>
+  ggplot(aes(variable, Trait, fill=value)) +
+  geom_tile(color="white") +
+  scale_fill_gradient2(low="darkred", mid="white", high="darkblue", midpoint=0) +
+  theme_minimal(base_size=12) +
+  labs(title="Factor Loadings (Varimax rotation)",
+       x="Factors", y="Traits", fill="Loading")
+
+```
+
+```{r}
+
+library(psych)
+
+# ---- Pretty factor diagram (exact style) ----
+# Tip: raise `cut` if you want to hide tiny loadings.
+make_fa_diagram <- function(fa_model,
+                            file = NULL,         # e.g., "FA_Pea_traits.png"
+                            width = 2800,        # pixels (about 9.3 in @ 300 dpi)
+                            height = 1800,       # pixels (about 6 in @ 300 dpi)
+                            dpi = 300,
+                            cut = 0.30,          # show |loading| >= 0.30
+                            digits = 2,          # print loadings to 2 decimals
+                            cex = 1.3,           # label size
+                            title = "Factor Analysis") {
+
+  # open device (PNG only if file is given)
+  if (!is.null(file)) png(file, width = width, height = height, res = dpi)
+
+  op <- par(no.readonly = TRUE)
+  on.exit(par(op), add = TRUE)
+
+  # generous margins so left labels never clip
+  par(mar = c(1, 1, 5, 1))  # bottom, left, top, right
+
+  fa.diagram(fa_model,
+             main        = title,
+             digits      = digits,
+             cut         = cut,
+             simple      = FALSE,   # keep cross-loadings if above `cut`
+             sort        = TRUE,    # group variables nicely
+             errors      = FALSE,   # hide uniqueness bubbles
+             residuals   = FALSE,
+             item.border = FALSE,   # clean look
+             # Line styles: positives solid, negatives dashed (psych default)
+             # Colors and widths for readability:
+             l.col       = "black",
+             g.col       = "black",
+             e.col       = "grey70",
+             arrows      = TRUE,    # arrowheads toward variables
+             digits.box  = FALSE,
+             cex         = cex,
+             Rtarget     = FALSE)
+
+  if (!is.null(file)) dev.off()
+}
+
+# Run it (uses your existing fa_model object)
+make_fa_diagram(fa_model,
+                file = "FA_Pea_traits.png",
+                title = "Exploratory Factor Analysis of Pea Traits (Varimax Rotation)",
+                cut = 0.30, cex = 1.35)
+
+
+```
+
+## Regression
+
+**Reproductive & Yield Traits:**
+
+Multiple significant positive correlations between pea reproductive and yield metrics characterized the reproductive-efficiency approach. A significant correlation exists between seed count (SdPPt) and pod count (PoPPt) ($r = 0.887^{}$), suggesting that pod production drives seed count. Yield per plant (YPPtg) was positively correlated with seed number ($r = 0.752^{}$) and pod number ($r = 0.661^{}$), indicating their impact on plant output. Pod length (Polncm) and width (Powdcm) were found to be strongly related ($r = 0.800^{}$), suggesting a single structural dimension of pod size. The association between thousand-seed weight (TSWg) and pod length (r = 0.551\^{}$) and breadth (r = 0.513^{}$) suggests that larger pods increase fullness and sink capacity, resulting in heavier The fairly positive association between seeds per pod (SdPPo) and seeds per plant ($r = 0.486^{}$) indicates coordination of reproductive efficiency across yield components. Additionally, yield per plant and plot showed a moderate correlation ($r = 0.485^{}$), indicating consistent scaling from individual plants to full plots. All interactions constitute a reproductive-efficiency pathway: $PoPPt \rightarrow SdPPt \rightarrow YPPtg YPPltg$.
+
+Some small yet physiologically meaningful unfavorable associations were discovered. The connection between SdPPt and TSWg ($r = -0.109^{}$) suggests a slight trade-off between seed size and number, indicating a common compensating effect in grain crops. Plants with more pods had smaller or thinner pods ($PoPPt$-$Powdcm$, $r = -0.199^{**}$), and SdPPt and Powdcm also showed a similar correlation ($r = -0.139^{*}$ Due to physiological resource allocation limits, increased reproductive numbers reduce organ size. Low correlations ($r < 0.2$) between SdPPo and Powdcm indicate minimal direct influence after controlling for seed number and pod count.
+
+The correlation structure demonstrates that reproductive amount controls pea yield more than vegetative growth. Seed weight enhances quality, while pod and seed count improve production most. Despite their physical differences, pod length and width indirectly promote sink capacity and seed growth. Environmental variability induces minor scatter ($r \approx 0.49$) in plot-level yield, which scales proportionally with plant-level output.
+
+The data suggest that reproductive efficiency drives pea production. More pods and seeds per plant and plot enhance yield, while larger seeds and well-formed pods boost productivity. Seed size and quantity have minor negative associations, indicating natural yield trade-offs. Positive correlations between pod, seed, and yield metrics indicate a coherent reproductive mechanism that controls phenotypic diversity in this pea germplasm.
+
+```{r}
+
+library(GGally)
+
+# --- Reproductive & Yield Traits ---
+ggpairs(Data[, c("YPPtg", "YPPltg", "PoPPt", "SdPPt", "TSWg",
+                 "Polncm", "Powdcm", "SdPPo")])
+
+# Morphological / vegetative traits
+ggpairs(Data[, c("PHcm", "Lfty", "Vig", "Empct", "Nd1fl", "Nd1po", "HaDAS", "Flcl")])
+
+# Phenological / Developmental Timing Traits
+ggpairs(Data[, c("DPdys", "DPMdys", "DFdys", "Ino",
+                 "Ilncm", "Pocl", "Pgm")])
+
+
+
+
+
+```
+
+```{r}
+library(GGally)
+GGally::ggpairs(Data[, c("YPPtg", "YPPltg", "PHcm", "PoPPt", "SdPPt", "TSWg", "Empct", "DFdys")])
+
+full_model <- lm(YPPtg ~ ., data=Data)
+step_model <- step(full_model, direction="both")
+summary(step_model)
+
+```
+
+## Model 1 (YPPtg)
+
+### Stepwise Multiple Linear Regression (AIC-based Selection)
+
+To identify the most influential morpho-agronomic traits associated with yield per plant (`YPPtg`), a stepwise multiple linear regression (MLR) model was fitted using the `step()` function in R with both forward and backward selection based on the Akaike Information Criterion (AIC).
+
+### Model Selection Approach
+
+Stepwise regression is a variable-selection method that iteratively adds or removes predictors from a full regression model in order to balance model fit and parsimony.\
+The decision criterion guiding this process is the Akaike Information Criterion, expressed as:
+
+$$
+AIC = n \ln(RSS/n) + 2k
+$$
+
+where
+
+-   $n$ = number of observations,\
+-   $RSS$ = residual sum of squares, and\
+-   $k$ = number of model parameters (including the intercept).
+
+AIC penalizes model complexity — every additional parameter increases the penalty term $2k$ — while rewarding goodness of fit through the residual sum of squares term.\
+The goal is to **minimize AIC**, achieving the simplest model that still explains the data effectively.
+
+The procedure began with the full model containing all 25 morpho-agronomic traits as predictors of `YPPtg`.\
+Variables were sequentially removed or re-added at each step depending on whether their inclusion reduced the AIC value.\
+The algorithm terminated when no further step produced a lower AIC, indicating an optimal trade-off between explanatory power and model simplicity.
+
+### Final Selected Model
+
+The stepwise search converged at **AIC = 634.38**, producing a parsimonious model with seven predictors:\
+**Empct (Emergence %), Nd1po (Node of first pod), Polncm (Pod length), Powdcm (Pod width), SdPPt (Seeds per plant), TSWg (1000-seed weight), and YPPltg (Yield per plot)**.
+
+The resulting multiple linear regression equation is:
+
+$$
+YPPtg_i = \beta_0 
++ \beta_1(Empct_i)
++ \beta_2(Nd1po_i)
++ \beta_3(Polncm_i)
++ \beta_4(Powdcm_i)
++ \beta_5(SdPPt_i)
++ \beta_6(TSWg_i)
++ \beta_7(YPPltg_i)
++ \varepsilon_i
+$$
+
+where $\varepsilon_i \sim N(0, \sigma^2)$ represents the model residuals.
+
+The model explained a very high proportion of total variability in yield per plant\
+($R^2 = 0.862$, Adjusted $R^2 = 0.859$), indicating excellent overall fit.\
+The residual standard error ($RSE = 2.59$) was low, suggesting that the observed and predicted yields were closely aligned.\
+The overall F-statistic ($F = 287.5$, $p < 2 \times 10^{-16}$) confirmed that the model was highly significant.
+
+### Interpretation of Coefficients
+
+| Trait | Estimate | Significance | Interpretation |
+|------------------|------------------|------------------|--------------------|
+| **Empct** | −0.0258 \* | Higher emergence % slightly reduced yield, possibly reflecting density-related competition or confounding with early vigor. |  |
+| **Nd1po** | +0.1427 (·) | More nodes to first pod slightly increased yield, implying a delayed but more productive reproductive phase. |  |
+| **Polncm** | +0.716 \*\*\* | Longer pods significantly enhanced yield, as pod length contributes directly to seed count and pod capacity. |  |
+| **Powdcm** | −2.388 \* | Wider pods were negatively associated with yield, perhaps due to structural or physiological trade-offs. |  |
+| **SdPPt** | +0.125 \*\*\* | The strongest positive predictor — more seeds per plant led to substantially higher yield. |  |
+| **TSWg** | +0.0529 \*\*\* | Heavier seeds contributed positively to total yield. |  |
+| **YPPltg** | +0.0159 \*\*\* | Yield per plot was positively correlated with individual-plant yield, reflecting scale consistency. |  |
+
+*Significance codes:* **p \< 0.001;** p \< 0.01; *p \< 0.05; ·p \< 0.1*
+
+### Biological and Practical Interpretation
+
+The regression analysis demonstrates that **reproductive traits** — particularly *seeds per plant (SdPPt)*, *1000-seed weight (TSWg)*, and *pod length (Polncm)* — are the dominant determinants of pea yield at the individual-plant level.\
+Together, these traits reflect reproductive efficiency and sink strength, explaining most of the yield variability.
+
+Traits such as *pod width (Powdcm)* and *emergence percentage (Empct)* showed small but negative effects, suggesting that early growth vigor or larger pod structures may not directly translate into higher yield under dryland conditions, possibly due to resource limitations.
+
+Overall, the model indicates that improvement in yield per plant can be primarily achieved by selecting genotypes with **greater seed number, heavier seeds, and longer pods**, while maintaining moderate vegetative growth.\
+The high explanatory power and biologically consistent coefficients confirm that the **stepwise AIC-selected MLR model** provides a robust statistical framework for identifying yield-driving traits in pea breeding programs.
+
+```{r}
+full_model <- lm(YPPtg ~ ., data=Data)
+step_model <- step(full_model, direction="both")
+summary(step_model)
+
+```
+
+## Model 2 (YPPltg)
+
+A smaller AIC value indicates a better compromise between goodness of fit and model parsimony.\
+The algorithm starts with all 25 candidate predictors and sequentially removes or reintroduces variables that most effectively reduce the AIC value.\
+The process stops when no further change improves AIC, yielding the most efficient explanatory model.
+
+### Final Selected Model
+
+The stepwise search converged at **AIC = 2404.69**, resulting in a parsimonious model with **seven key predictors**:\
+**Empct (Emergence %), Lfty (Leaf type), Nd1fl (Node of first flower), Pocl (Pod color), PHcm (Plant height), TSWg (1000-seed weight), and YPPtg (Yield per plant)**.
+
+The final fitted model is:
+
+$$
+YPPltg_i = \beta_0 
++ \beta_1(Empct_i)
++ \beta_2(Lfty_i)
++ \beta_3(Nd1fl_i)
++ \beta_4(Pocl_i)
++ \beta_5(PHcm_i)
++ \beta_6(TSWg_i)
++ \beta_7(YPPtg_i)
++ \varepsilon_i
+$$
+
+where $\varepsilon_i \sim N(0, \sigma^2)$ are the model residuals.
+
+The model explained a moderate proportion of variability in plot-level yield ($R^2 = 0.506$, Adjusted $R^2 = 0.495$), indicating that about half of the total variation in yield per plot can be attributed to the selected morpho-agronomic traits.\
+The residual standard error ($RSE = 38.19$) reflects typical deviations between observed and predicted yields.\
+The overall F-statistic ($F = 47.01$, $p < 2.2 \times 10^{-16}$) confirmed the model’s high overall significance.
+
+### Interpretation of Coefficients
+
+| Trait | Estimate | Significance | Interpretation |
+|-----------------|-----------------|------------------|--------------------|
+| **Empct** | +1.5119 \*\*\* | A strong positive effect: higher emergence percentage significantly increased plot yield, reflecting the contribution of stand establishment to overall productivity. |  |
+| **Lfty** | +40.1318 \*\*\* | The leaf-type factor had a large positive influence, suggesting that certain canopy morphologies (e.g., semi-leafless or afila types) promote better light interception and yield. |  |
+| **Nd1fl** | +1.6216 (·) | A marginally positive effect: genotypes with more nodes to the first flower tend to have delayed flowering but may achieve higher total biomass before reproduction. |  |
+| **Pocl** | −30.7825 (·) | Pod color had a weak negative effect, possibly reflecting genetic linkage with other morphological features that do not directly favor yield. |  |
+| **PHcm** | −0.2947 \*\* | Taller plants were associated with slightly lower yield per plot, likely due to higher vegetative investment at the cost of reproductive output. |  |
+| **TSWg** | +0.1912 \*\*\* | A strong positive association: heavier seeds contributed significantly to total yield, indicating improved seed filling efficiency. |  |
+| **YPPtg** | +3.1018 \*\*\* | The strongest predictor: yield per plant scaled positively with yield per plot, confirming consistency between individual plant and plot-level productivity. |  |
+
+*Significance codes:* **p \< 0.001;** p \< 0.01; *p \< 0.05; ·p \< 0.1*
+
+### Biological and Practical Interpretation
+
+The regression analysis highlights that plant establishment and reproductive efficiency are the major determinants of plot-level yield in pea genotypes.\
+Among all predictors, emergence percentage (Empct) and yield per plant (YPPtg) exerted the strongest positive effects, showing that well-established stands and productive individual plants translate directly into higher total yield. The positive influence of 1000-seed weight (TSWg) further supports the role of grain size and filling efficiency in driving yield performance.
+
+Traits such as leaf type (Lfty) and node of first flower (Nd1fl) point to the physiological importance of canopy structure and flowering onset. Semi-leafless types may better utilize light and reduce lodging, while moderate delay in flowering allows more vegetative growth and resource accumulation prior to reproduction.\
+In contrast, taller plant height (PHcm) was slightly detrimental, possibly due to biomass allocation toward stems rather than pods (Not sure!).
+
+Overall, the stepwise AIC-based MLR model for **YPPltg** identifies a concise set of morpho-agronomic traits that jointly explain over 50% of the observed yield variation.\
+This model underscores that breeding efforts aiming to maximize yield per plot should focus on **vigorous emergence, optimal canopy morphology, heavier seeds, and balanced vegetative-reproductive growth**, while avoiding excessive plant height or morphological traits unrelated to reproductive output.
+
+```{r}
+full_model1 <- lm(YPPltg ~ ., data=Data)
+step_model1 <- step(full_model1, direction="both")
+summary(step_model1)
+
+```
+
+### Comparative Interpretation of Yield Models
+
+The two AIC-optimized stepwise regression models—one for **yield per plant (YPPtg)** and the other for **yield per plot (YPPltg)**—collectively provide a comprehensive understanding of yield formation in pea genotypes at different biological scales.
+
+The **YPPtg model** (Adjusted $R^2 = 0.859$) identified *seeds per plant (SdPPt)*, *1000-seed weight (TSWg)*, and *pod length (Polncm)* as dominant contributors, emphasizing that reproductive sink strength and seed-filling traits are the primary determinants of individual plant productivity.\
+This model reflects **within-plant efficiency**, focusing on how reproductive allocation translates into yield per plant.
+
+In contrast, the **YPPltg model** (Adjusted $R^2 = 0.495$) highlighted *emergence percentage (Empct)*, *leaf type (Lfty)*, *1000-seed weight (TSWg)*, and *yield per plant (YPPtg)* as significant predictors.\
+Here, yield performance extends beyond individual plant traits to incorporate **stand establishment and canopy-level effects**, such as population density, light interception, and uniformity of emergence.
+
+The consistency of **TSWg** and **YPPtg** as strong positive predictors across both models underscores the robustness of these traits as core yield determinants.\
+While the plant-level model explains intrinsic physiological efficiency, the plot-level model captures collective performance under field conditions.
+
+Together, these models demonstrate that optimizing pea yield requires simultaneous improvement of both individual plant productivity (sink traits) and population-level performance (stand and canopy traits)
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+
+# ---- Data frame describing relationships ----
+yield_path <- tibble::tribble(
+  ~Level, ~Trait,       ~Effect, ~Category,
+  "Plant-level (YPPtg)", "SdPPt",   "Positive", "Reproductive",
+  "Plant-level (YPPtg)", "TSWg",    "Positive", "Seed quality",
+  "Plant-level (YPPtg)", "Polncm",  "Positive", "Reproductive",
+  "Plant-level (YPPtg)", "Powdcm",  "Negative", "Structural",
+  "Plant-level (YPPtg)", "Empct",   "Negative", "Growth",
+  "Plot-level (YPPltg)", "Empct",   "Positive", "Growth",
+  "Plot-level (YPPltg)", "Lfty",    "Positive", "Morphology",
+  "Plot-level (YPPltg)", "Nd1fl",   "Positive", "Developmental",
+  "Plot-level (YPPltg)", "Pocl",    "Negative", "Color/Morph.",
+  "Plot-level (YPPltg)", "PHcm",    "Negative", "Structural",
+  "Plot-level (YPPltg)", "TSWg",    "Positive", "Seed quality",
+  "Plot-level (YPPltg)", "YPPtg",   "Positive", "Integrated Yield"
+)
+
+# ---- Factor order for clean plotting ----
+yield_path <- yield_path %>%
+  mutate(Level = factor(Level, levels = c("Plant-level (YPPtg)", "Plot-level (YPPltg)")),
+         Effect = factor(Effect, levels = c("Negative", "Positive")))
+
+# ---- Visualization ----
+ggplot(yield_path, aes(x = Level, y = Trait, color = Effect)) +
+  geom_point(aes(size = 5, alpha = 0.9)) +
+  geom_text_repel(aes(label = Trait), size = 4.2, fontface = "bold", nudge_x = 0.2, show.legend = FALSE) +
+  scale_color_manual(values = c("Negative" = "#377EB8", "Positive" = "#E41A1C")) +
+  theme_minimal(base_size = 14) +
+  labs(
+    title = "Pathway of Morpho-Agronomic Traits Influencing Yield in Pea",
+    subtitle = "Integration of Stepwise MLR Results for YPPtg (Plant-level) and YPPltg (Plot-level)",
+    x = NULL,
+    y = NULL,
+    color = "Effect Direction"
+  ) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15, hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    legend.position = "bottom",
+    axis.text.x = element_text(face = "bold", size = 13),
+    axis.text.y = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  ) +
+  geom_segment(
+    data = data.frame(
+      x = c(1, 1, 2, 2),
+      xend = c(2, 2, 2.1, 2.1),
+      y = c(2, 7, 3, 6),
+      yend = c(6, 9, 4, 8)
+    ),
+    aes(x = x, xend = xend, y = y, yend = yend),
+    arrow = arrow(length = unit(0.2, "cm")),
+    color = "gray40", inherit.aes = FALSE, linetype = "dashed"
+  )
+
+```
+
+**Interpretation:**
+
+Based on stepwise AIC-selected multiple-regression models, the route diagram shows how morpho-agronomic factors affect pea yield per plant and per plot. The plant-level (YPPtg) model on the left covers reproductive and seed variables that directly affect plant productivity. The plot-level (YPPltg) model shows stand-scale and morphological parameters affecting field yield on the right. Red nodes indicate features with positive coefficients (yield-boosting traits), while blue nodes suggest negative effects. Dashed arrows highlight conceptual relationships showing how plant-level features can influence plot yield—often through YPPtg—or how the same variable (such as TSWg or Empct) operates differently across scales. Reproductive efficiency controls plant yield: more seeds per plant (SdPPt), heavier seed weight (TSWg), and longer pods (Polncm) increase output, while broader pods (Powdcm) and higher emergence density (Empct) slightly decrease it due to intra-plant competition. Stand establishment and canopy performance dominate plot-level factors: higher emergence (Empct) and leafiness (Lfty) increase yield, whereas excessive plant height (PHcm) or pod morphologies (Pocl) decrease it. Positive drivers like yield per plant (YPPtg) and seed weight (TSWg) illustrate that plant performance directly affects plot yield. The figure shows a definite biological hierarchy. Individual efficiency is determined by reproductive qualities, while establishment and canopy traits determine collective productivity. Competition lowers per-plant production but increases plot yield, as shown by the flipped Empct signals between models. The two regression lines show that pea yield enhancement requires balancing plant-level reproductive potential and population-level structural efficiency.
+
+```{r}
+# Standardize predictors before lm
+scaled_data <- Data %>%
+  mutate(across(where(is.numeric), scale)) %>%
+  drop_na()
+
+model_scaled <- lm(YPPtg ~ Empct + Nd1po + Polncm + Powdcm + SdPPt + TSWg + YPPltg, data = scaled_data)
+summary(model_scaled)
+
+```
